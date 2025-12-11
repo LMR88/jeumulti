@@ -1,10 +1,10 @@
 using Unity.Collections;
 using Unity.Netcode;
 using UnityEngine;
+using System.Collections;
 
 public class PlayerNetwork : NetworkBehaviour
 {
-    [SerializeField] private NetworkObject prefab;
     [SerializeField] private float moveSpeed = 10f;
     [SerializeField] private float runMoveSpeed = 5f;
     [SerializeField] private float rotationSpeed = 5f;
@@ -14,17 +14,22 @@ public class PlayerNetwork : NetworkBehaviour
     [SerializeField] private BoxCollider _collider;
     [SerializeField] private PropDatabase database;
 
+    // ✅ AJOUT : écran noir + freeze
+    [SerializeField] private GameObject blackScreen;
+    private bool isFrozen = false;
+
     private int _id;
     private Transform _cam;
     private Camera _playerCam;
 
     private bool Run => Input.GetKey(KeyCode.LeftShift);
-    private bool _hunter;
+
+    private NetworkVariable<PlayerRole> _role = new NetworkVariable<PlayerRole>(
+        PlayerRole.None, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
     private NetworkVariable<int> currentPropId =
         new NetworkVariable<int>(0, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
-    // PlayerData : SEUL LE SERVEUR PEUT ÉCRIRE (meilleur choix)
     public NetworkVariable<PlayerData> _playerData = new(
         new PlayerData { Health = 5, Stunned = false },
         NetworkVariableReadPermission.Everyone,
@@ -44,19 +49,40 @@ public class PlayerNetwork : NetworkBehaviour
             ApplyProp(newValue);
         };
 
+        _role.OnValueChanged += (_, newValue) =>
+        {
+            Debug.Log($"PLAYER {OwnerClientId} rôle = {newValue}");
+
+            // ✅ Quand le rôle change → appliquer le freeze si Hunter
+            if (IsOwner)
+                OnRoleAssigned(newValue);
+        };
+
         if (IsOwner)
         {
             CameraController.instance.LookAt(transform);
             _playerCam = CameraController.instance.playerCam;
             _cam = CameraController.instance.transform;
+
+            // ✅ sécurité : écran noir off au spawn
+            if (blackScreen != null)
+                blackScreen.SetActive(false);
         }
 
-        _hunter = IsHost; // Le host est le hunter
+        if (IsServer)
+        {
+            PlayerRole role = Random.value > 0.5f ? PlayerRole.Prop : PlayerRole.Hunter;
+            _role.Value = role;
+        }
     }
 
     private void Update()
     {
         if (!IsOwner) return;
+
+        // ✅ Si gelé → aucun mouvement
+        if (isFrozen)
+            return;
 
         HandleMovement();
 
@@ -67,16 +93,46 @@ public class PlayerNetwork : NetworkBehaviour
 
         if (Input.GetMouseButtonDown(0))
         {
-            if (_hunter)
+            if (_role.Value == PlayerRole.Hunter)
+            {
                 Attack();
-            else
+            }
+            else if (_role.Value == PlayerRole.Prop)
+            {
                 SelectProp();
+            }
         }
     }
 
-    // ----------------------------
-    //  MOVEMENT
-    // ----------------------------
+    // ✅ Quand un rôle est attribué
+    private void OnRoleAssigned(PlayerRole role)
+    {
+        if (role == PlayerRole.Hunter)
+        {
+            StartCoroutine(FreezeHunterCoroutine());
+        }
+    }
+
+    // ✅ Freeze + écran noir 20 sec
+    private IEnumerator FreezeHunterCoroutine()
+    {
+        isFrozen = true;
+
+        if (IsOwner && blackScreen != null)
+            blackScreen.SetActive(true);
+
+        Debug.Log("Hunter gelé pendant 20 secondes");
+
+        yield return new WaitForSeconds(20f);
+
+        isFrozen = false;
+
+        if (IsOwner && blackScreen != null)
+            blackScreen.SetActive(false);
+
+        Debug.Log("Hunter libéré !");
+    }
+
     private void HandleMovement()
     {
         float horizontalInput = Input.GetAxis("Horizontal");
@@ -96,9 +152,6 @@ public class PlayerNetwork : NetworkBehaviour
         }
     }
 
-    // ----------------------------
-    //  PROP SELECTION
-    // ----------------------------
     private void SelectProp()
     {
         Ray ray = _playerCam.ScreenPointToRay(Input.mousePosition);
@@ -135,9 +188,6 @@ public class PlayerNetwork : NetworkBehaviour
         _collider.center = database.colliderCenter[id];
     }
 
-    // ----------------------------
-    //  ATTACK SYSTEM
-    // ----------------------------
     private void Attack()
     {
         Ray ray = _playerCam.ScreenPointToRay(Input.mousePosition);
@@ -156,7 +206,7 @@ public class PlayerNetwork : NetworkBehaviour
             }
             else if (target.CompareTag("Prop"))
             {
-                DamagePlayerServerRpc(OwnerClientId, 1); // se blesse lui-même
+                DamagePlayerServerRpc(OwnerClientId, 1);
             }
         }
     }
@@ -179,17 +229,17 @@ public class PlayerNetwork : NetworkBehaviour
             KillPlayerServerRpc(targetClientId);
     }
 
-    [ServerRpc]
+    [ServerRpc(RequireOwnership = false)]
     private void KillPlayerServerRpc(ulong targetClientId)
     {
         var target = NetworkManager.Singleton.ConnectedClients[targetClientId].PlayerObject;
         if (target != null)
+        {
             target.Despawn();
+            GameManager.Instance.PlayerDied(targetClientId);
+        }
     }
 
-    // ----------------------------
-    //  DESTROY SELF
-    // ----------------------------
     [ServerRpc]
     private void RequestDestroyServerRpc()
     {
@@ -197,7 +247,6 @@ public class PlayerNetwork : NetworkBehaviour
             NetworkObject.Despawn();
     }
 }
-
 
 public struct PlayerData : INetworkSerializable
 {

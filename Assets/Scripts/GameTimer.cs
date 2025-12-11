@@ -1,40 +1,56 @@
 using Unity.Netcode;
 using UnityEngine;
+using TMPro;
 
-public class GameTimer : NetworkBehaviour
+public class CountdownTimerSynchronise : NetworkBehaviour
 {
-    public NetworkVariable<float> timeRemaining = 
-        new NetworkVariable<float>(600f);
+    [SerializeField] private TMP_Text timerText;
+    [SerializeField] private int countdownDuration = 60;
 
-    private bool running = false;
+    private NetworkVariable<double> startTime = new NetworkVariable<double>();
 
     public override void OnNetworkSpawn()
     {
-        Debug.Log("GameTimer SPAWNED on " + (IsServer ? "SERVER" : "CLIENT"));
-
         if (IsServer)
         {
-            timeRemaining.Value = 600f;
-            running = true;
+            StartNewTimer();
         }
     }
 
-    private void Update()
+    void Update()
     {
-        if (!IsServer)
+        if (!IsSpawned) return;
+
+        // Utilise ServerTime pour une référence commune
+        double elapsed = NetworkManager.Singleton.ServerTime.Time - startTime.Value;
+        double remaining = countdownDuration - elapsed;
+        if (remaining < 0) remaining = 0;
+
+        int minutes = Mathf.FloorToInt((float)remaining / 60f);
+        int seconds = Mathf.FloorToInt((float)remaining % 60f);
+
+        timerText.text = $"{minutes:00}:{seconds:00}";
+
+        if (IsServer && remaining <= 0)
         {
-            return;
+            TimerFinishedClientRpc();
         }
+    }
 
-        if (!running)
-            return;
+    [ServerRpc(RequireOwnership = false)]
+    public void RestartTimerServerRpc()
+    {
+        StartNewTimer();
+    }
 
-        timeRemaining.Value -= Time.deltaTime;
+    private void StartNewTimer()
+    {
+        startTime.Value = NetworkManager.Singleton.ServerTime.Time;
+    }
 
-        if (timeRemaining.Value <= 0)
-        {
-            timeRemaining.Value = 0;
-            running = false;
-        }
+    [ClientRpc]
+    private void TimerFinishedClientRpc()
+    {
+        timerText.text = "FIN DU TIMER";
     }
 }
