@@ -9215,7 +9215,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 3819817814
+  GlobalObjectIdHash: 3690249370
   InScenePlacedSourceGlobalObjectIdHash: 0
   DeferredDespawnTick: 0
   Ownership: 1
@@ -9240,7 +9240,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e2ef6845ee8e81645853ec63982a3c7e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GameManager
-  ShowTopMostFoldoutHeaderGroup: 1
 --- !u!4 &814413615
 Transform:
   m_ObjectHideFlags: 0

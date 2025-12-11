@@ -1,84 +1,78 @@
-using System;
 using UnityEngine;
 
 public class CameraController : MonoBehaviour
 {
     public static CameraController instance;
 
-    private Transform _target;
+    [Header("Target")]
+    public Transform target;
+
+    [Header("Camera Settings")]
     public Camera playerCam;
+
+    [Header("Orbit Settings")]
+    public float sensitivityX = 200f;
+    public float sensitivityY = 120f;
+    public float minYAngle = -40f;
+    public float maxYAngle = 80f;
+    public float height = 2f;
+
+    [Header("Distances par rôle")]
+    public float hunterDistance = 6f;
+    public float propDistance = 3f;
+
+    private float yaw;
+    private float pitch;
 
     private void Awake()
     {
         instance = this;
+
+        if (playerCam == null)
+            playerCam = GetComponentInChildren<Camera>();
     }
 
-    [SerializeField] private float rotationSpeed = 2f;
-    [SerializeField] private float height = 0.8f;
-    [SerializeField] private float distance = 3f;
-    [SerializeField] private float minAngle = -20f;
-    [SerializeField] private float maxAngle = 20f;
-    [SerializeField] private LayerMask obstructionMask;
-    [SerializeField] private float wallOffset = 0.1f;
-
-    private float _rotationX;
-    private float _rotationY;
-
-    // Nouveau : état du lock
-    private bool _rotationLocked = false;
-
-    private void Update()
+    public void LookAt(Transform newTarget)
     {
-        HandleLockInput();
-        UpdateRotation();
-        UpdatePosition();
+        target = newTarget;
+
+        Vector3 dir = (transform.position - target.position).normalized;
+        Quaternion rot = Quaternion.LookRotation(dir);
+
+        Vector3 angles = rot.eulerAngles;
+        yaw = angles.y;
+        pitch = angles.x;
     }
 
-    private void HandleLockInput()
+    private void LateUpdate()
     {
-        // Toggle avec Ctrl gauche
-        if (Input.GetKeyDown(KeyCode.LeftControl))
+        if (target == null) return;
+
+        float mouseX = Input.GetAxis("Mouse X");
+        float mouseY = Input.GetAxis("Mouse Y");
+
+        yaw += mouseX * sensitivityX * Time.deltaTime;
+        pitch -= mouseY * sensitivityY * Time.deltaTime;
+        pitch = Mathf.Clamp(pitch, minYAngle, maxYAngle);
+
+        Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
+
+        // ✅ Distance dynamique selon le rôle
+        float finalDistance = 4f;
+        var player = target.GetComponent<PlayerNetwork>();
+
+        if (player != null)
         {
-            _rotationLocked = !_rotationLocked;
-            Debug.Log("Camera rotation lock = " + _rotationLocked);
+            if (player.Role == PlayerRole.Hunter)
+                finalDistance = hunterDistance;
+            else
+                finalDistance = propDistance;
         }
-    }
 
-    private void UpdateRotation()
-    {
-        if (!_target) return;
-        if (_rotationLocked) return; // si lock, on ne bouge pas
+        Vector3 offset = rotation * new Vector3(0, 0, -finalDistance);
+        offset.y += height;
 
-        _rotationY += Input.GetAxis("Mouse X") * rotationSpeed;
-        _rotationX -= Input.GetAxis("Mouse Y") * rotationSpeed;
-        _rotationX = Mathf.Clamp(_rotationX, minAngle, maxAngle);
-
-        transform.rotation = Quaternion.Euler(_rotationX, _rotationY, 0f);
-    }
-
-    private void UpdatePosition()
-    {
-        if (!_target) return;
-
-        Vector3 offset = transform.rotation * new Vector3(0f, 0f, -distance) + new Vector3(0f, height, 0f);
-        Vector3 position = _target.position + offset;
-
-        Vector3 rayOrigin = _target.position + Vector3.up * height;
-        Vector3 rayDir = (position - rayOrigin).normalized;
-        float rayDist = Vector3.Distance(position, rayOrigin);
-
-        if (Physics.Raycast(rayOrigin, rayDir, out RaycastHit hit, rayDist, obstructionMask))
-        {
-            transform.position = hit.point - rayDir * wallOffset;
-        }
-        else
-        {
-            transform.position = position;
-        }
-    }
-
-    public void LookAt(Transform target)
-    {
-        _target = target;
+        transform.position = target.position + offset;
+        transform.rotation = rotation;
     }
 }
